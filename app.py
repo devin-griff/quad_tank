@@ -46,7 +46,7 @@ import pyomo.environ as pyo
 # Importing the package registers it with Pyomo's SolverFactory, so the
 # `pyo.SolverFactory('pounce')` call later resolves to the bundled binary.
 import pyomo_pounce  # noqa: F401
-import io, contextlib
+import io, contextlib, threading
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -225,6 +225,13 @@ solve_btn = st.sidebar.button(
 # values at element boundaries (z_i0[ii]) match the last collocation point
 # of the previous element, giving a continuous solution.
 
+# One solve at a time per machine: every Streamlit session runs app.py in
+# its own thread of this one process, and the solver-log capture redirects
+# process-global stdout. Overlapping captures corrupt each other and fail
+# both solves, so every solve serializes behind this lock.
+_SOLVE_LOCK = threading.Lock()
+
+
 def solve_model(zi, nfe, h, rho):
     m = pyo.ConcreteModel()
 
@@ -398,7 +405,7 @@ def solve_model(zi, nfe, h, rho):
     # the Logs tab.
     solver = pyo.SolverFactory('pounce')
     buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
+    with _SOLVE_LOCK, contextlib.redirect_stdout(buf):
         result = solver.solve(m, tee=True)
     status = str(result.solver.termination_condition)
 
